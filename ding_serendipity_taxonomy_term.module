@@ -1,11 +1,9 @@
 <?php
-// $id$
-
 /**
  * @file
- * empty module which is used for custom development.
+ * ding serendipity taxonomy term
  *
- * Description of the module.
+ * This module provides serendipity content based on taxonomy terms
  */
 
 /**
@@ -39,7 +37,7 @@ function ding_serendipity_taxonomy_term_serendipity_info() {
     ),
     'popular_objects' => array(
       'title' => 'Objects in taxonomy term popular field', 
-      'description' => 'On each taxonomy term a list of recommended objects may be suggested.', 
+      'description' => 'On each taxonomy term a list of popular objects may be suggested.', 
       'keys' => array('taxonomy_tid', 'popular'), 
     ),
   );
@@ -60,13 +58,120 @@ function ding_serendipity_taxonomy_term_serendipity_info() {
 function ding_serendipity_taxonomy_term_recommended_objects_serendipity_add($context) {
   
   // No term no result @todo recommended among recent
-  if (isset($context['recent']) || !isset($context['taxonomy_tid']) || !isset($context['bundle']) || ($context['bundle'] != 'ting_object' )) {
+  if (isset($context['recent']) || !isset($context['taxonomy_tid']) || !is_numeric($context['taxonomy_tid']) || !isset($context['bundle']) || ($context['bundle'] != 'ting_object' )) {
     return array();
   }
-
+  
   $term = taxonomy_term_load($context['taxonomy_tid']);
 
   $result = ding_serendipity_taxonomy_term_fetch_ting_objects('field_taxonomy_ting_objects', $term);
+  return $result;
+}
+
+/**
+ * Fetch ting_objects or nodes matching $context['taxonomy_term']
+ * @todo comments
+ */
+function ding_serendipity_taxonomy_term_recent_serendipity_add($context) {
+  $term_arr = ding_serendipity_taxonomy_get_term($context);
+
+  // Validate context  
+  if ($term_arr === FALSE || !isset($context['recent'])) {
+    return array();
+  }
+
+  $term = $term_arr['term'];
+  // Select content from this year
+  $year = date('Y');
+  $limit = 16;
+  if(isset($context['max']) && is_numeric($context['max'])) {
+    $limit = $context['max'];
+  }
+  // Apply term query 
+  $facets[] = $term_arr['query'];
+  
+  $query = implode(' AND ', $facets);
+  
+  // Order by date 
+  $result = ding_base_do_search($query,
+    array(
+      'options' => array('sort' => 'acquisitionDate_descending'),
+      'limit' => $limit,
+    )
+  );
+  return $result;
+}
+
+/**
+ * Fetch ting_objects or nodes matching $context['taxonomy_term']
+ * @todo comments
+ */
+function ding_serendipity_taxonomy_term_related_by_term_serendipity_add($context) {
+  global $user;
+  
+  // No term no result
+  $term_arr = ding_serendipity_taxonomy_get_term($context);
+  if ($term_arr === FALSE || isset($context['recent'])) {
+    return array();
+  }
+  
+  $term = $term_arr['term'];
+  $query = $term_arr['query'];
+  
+  $results = array(); 
+  if ($context['bundle'] == 'ting_object') {
+    $results = ding_base_do_search($query);
+  }
+  else {
+    if(isset($context['frontpage']) && $context['frontpage']) {
+      // Fetch promoted to frontpage nodes of the desired type
+      $nodeQuery = new EntityFieldQuery();
+      $nodeQuery->entityCondition('entity_type', 'node')
+        ->propertyCondition('status', 1)
+        ->propertyCondition('promote', 1) //change 2 to any vocabulary ID
+        ->propertyOrderBy('created', 'DESC')
+        ->range(0, 20);
+      if (!empty($context['bundle'])) {
+        $nodeQuery->propertyCondition('type', $context['bundle']);
+      }
+      $nodes = $nodeQuery->execute();
+      foreach($nodes['node'] as $node) {
+        $results[] = array('type' => 'node', 'id' => $node->nid);
+      }
+    } else {
+      // Fetch nodes matching $tid
+      $nodeQuery = new EntityFieldQuery();
+      $nodeQuery->entityCondition('entity_type', 'node')
+        ->fieldCondition('ding_content_tags', 'tid', $term->tid)
+        ->propertyOrderBy('created', 'DESC')
+        ->range(0, 20);
+      if (!empty($context['bundle'])) {
+        $nodeQuery->propertyCondition('type', $context['bundle']);
+      }
+      $nodes = $nodeQuery->execute();
+      foreach($nodes['node'] as $node) {
+        $results[] = array('type' => 'node', 'id' => $node->nid);
+      }
+    }
+  }
+  return $results;
+}
+
+/**
+ * Fetch object id's from term recommended field
+ * 
+ * @context array
+ *  Serendipity context array
+ *
+ * @return array
+ *  Array of results, each result should contain a type and an id key.
+ *  - type is the entity Type.
+ *  - id the entity id.
+ * @todo comments
+ */
+function ding_serendipity_taxonomy_term_popular_objects_serendipity_add($context) {
+  $term = taxonomy_term_load($context['taxonomy_tid']);
+  $result = ding_serendipity_taxonomy_term_fetch_ting_objects('field_popular_ting_objects', $term);
   return $result;
 }
 
@@ -99,45 +204,8 @@ function ding_serendipity_taxonomy_term_fetch_ting_objects($field, $term) {
 }
 
 /**
- * Fetch ting_objects or nodes matching $context['taxonomy_term']
- * @todo comments
+ * Helper function to extract term and often used stuff 
  */
-function ding_serendipity_taxonomy_term_recent_serendipity_add($context) {
-  $term_arr = ding_serendipity_taxonomy_get_term($context);
-
-  // Validate context  
-  if ($term_arr === FALSE || !isset($context['recent'])) {
-    return array();
-  }
-
-  $term = $term_arr['term'];
-  
-  // Select content from this year
-  $year = date('Y');
-
-  // Apply term query 
-  $facets[] = $term_arr['query'];
-  
-  $query = implode(' AND ', $facets);
-
-
-
-  // Order by date 
-  $result = ding_serendipity_do_search($query,
-    array(
-      'options' => array('sort' => 'acquisitionDate_descending'),
-      'limit' => 16,
-    )
-  );
-  
-  return $result;
-}
-
-/*
-*
-* Helper function to extract term and often used stuff 
-*
-*/
 function ding_serendipity_taxonomy_get_term($context) {
   if (!isset($context['taxonomy_tid']) ) {
     return FALSE;
@@ -147,11 +215,12 @@ function ding_serendipity_taxonomy_get_term($context) {
   
   $term_arr = array();
   if (!empty($term->field_search_string)) {
+    // Manual broend term query
     $term_arr['query'] = $term->field_search_string[field_language('taxonomy_term', $term, 'field_search_string')][0]['value'];
-    $term_arr['has_query'] = TRUE;
     $term_arr['has_query'] = TRUE;
   }
   else {
+    // Default broend term query
     $term_arr['query'] = $term->name;
     $term_arr['has_query'] = FALSE;
   }
@@ -161,61 +230,60 @@ function ding_serendipity_taxonomy_get_term($context) {
 }
 
 /**
- * Fetch ting_objects or nodes matching $context['taxonomy_term']
- * @todo comments
+ * implements hook_serendipity_fallback
  */
-function ding_serendipity_taxonomy_term_related_by_term_serendipity_add($context) {
-  module_load_include('client.inc', 'ting');
-  global $user;
-  
-  // No term no result
-  $term_arr = ding_serendipity_taxonomy_get_term($context);
-  if ($term_arr === FALSE || isset($context['recent']))
-    return array();
-  
-  $term = $term_arr['term'];
-  $query = $term_arr['query'];
-  
-  $results = array(); 
-  if ($context['bundle'] == 'ting_object') {
-    $results = ding_serendipity_do_search($query);
-  }
-  else {
-    // Fetch nodes matching $tid
-    $query = db_select('taxonomy_index', 'i');
-    $query->join('taxonomy_term_data', 't', 'i.tid = t.tid');
-    $query->fields('i', array('nid'));
-    $query->condition('i.tid', $term->tid);
-    $query->condition('t.vid', 2);
-    $query->join('node', 'n', 'n.nid = i.nid');
-    $query->fields('n', array('type'));
-    
-    if (!empty($context['bundle'])) {
-      $query->condition('n.type', $context['bundle']);
-    }
-    $query->range(0, 20);
-    $nids = $query->execute();
-    foreach ($nids as $nid) {
-      $results[] = array('type' => 'node', 'id' => $nid->nid);
+function ding_serendipity_taxonomy_term_serendipity_fallback($ids, $context) {
+  $list = array();
+  $limit = $context['min'];
+  // Handle ting objects
+  // We assume that if no inspiration is found, at least recent materials exists
+  if (isset($context['bundle']) && $context['bundle'] == 'ting_object') {
+    $context['recent'] = TRUE;
+    $fallback = ding_serendipity_taxonomy_term_recent_serendipity_add($context);
+    foreach ($fallback as $item) {
+      $item['source'] = array(
+        'title' => 'Fallback ting content',
+        'description' => 'Fallback content are provided to meet minimum count of result.',
+        'keys' => array('fallback'),
+      );
+      $list[] = $item;
     }
   }
-  return $results;
-}
-
-/**
- * Fetch object id's from term recommended field
- * 
- * @context array
- *  Serendipity context array
- *
- * @return array
- *  Array of results, each result should contain a type and an id key.
- *  - type is the entity Type.
- *  - id the entity id.
- * @todo comments
- */
-function ding_serendipity_taxonomy_term_popular_objects_serendipity_add($context) {
-  $term = taxonomy_term_load($context['taxonomy_tid']);
-  $result = ding_serendipity_taxonomy_term_fetch_ting_objects('field_popular_ting_objects', $term);
-  return $result;
+  
+  // @todo: handle other entities than node (nid)
+  if (isset($context['entity_type']) && $context['entity_type'] == 'node') {
+    $query = new EntityFieldQuery();
+  
+    $query->entityCondition('entity_type', $context['entity_type']);
+    if ($context['bundle']) {
+      $query->entityCondition('bundle', $context['bundle']);
+    }
+    if ($context['entity_type'] == 'node') {
+      $query->propertyCondition('status', 1);
+      $query->propertyOrderBy('created', 'DESC');
+    }
+  
+    if (count($ids)) {
+      // @todo: handle other entities than node (nid)
+      $query->propertyCondition('nid', $ids, 'NOT IN');
+    }
+  
+    $query->range(0, $limit)
+      ->addMetaData('account', user_load(1)); // @todo: Run the query as user 1?
+  
+    $result = $query->execute();
+    foreach ($result[$context['entity_type']] as $item) {
+      $list[] = array(
+        'type' => 'node',
+        'id' => $item->nid,
+        // Fake a source description
+        'source' => array(
+          'title' => 'Fallback content',
+          'description' => 'Fallback content are provided to meet minimum count of result.',
+          'keys' => array('fallback'),
+        ),
+      );
+    }
+  }
+  return $list;
 }
